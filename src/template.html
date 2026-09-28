@@ -175,10 +175,10 @@ footer b{color:var(--ink-2);font-weight:500}
   <section class="card">
     <div class="hd">
       <h2>35년 전체 &mdash; 지수와 250일선, 그리고 두 문턱</h2>
-      <span class="eyebrow">회색 음영 = 레버리지 축소 구간 · 점선 = 신호 변경일 (좌우로 스크롤)</span>
+      <span class="eyebrow">회색 음영 = 레버리지 축소 구간 · 점선 = 신호 변경일 · 좌우 스크롤, 마우스 휠로 확대/축소</span>
     </div>
     <div class="chartwrap"><svg id="chart" viewBox="0 0 1000 460" role="img"
-      aria-label="1991년부터 현재까지 나스닥100 지수와 250일 이동평균, VIX 10일 평균, 52주 낙폭 추이. 좌우로 스크롤해서 볼 수 있음"></svg></div>
+      aria-label="1991년부터 현재까지 나스닥100 지수와 250일 이동평균, VIX 10일 평균, 52주 낙폭 추이. 좌우로 스크롤하고 마우스 휠로 확대·축소할 수 있음"></svg></div>
     <div class="legend">
       <span><i style="background:var(--ink)"></i>NDX</span>
       <span><i style="background:var(--accent)"></i>250일선</span>
@@ -334,99 +334,114 @@ $('#caution').innerHTML = DATA.caution || '';
 
 /* ── 차트 ── */
 (function(){
-  const C = DATA.chart, svg = $('#chart');
-  // 35년치를 한 화면에 욱여넣지 않고, 거래일당 일정 폭을 줘서 좌우로 스크롤해서 본다.
-  const PX_PER_DAY = 3;
+  const C = DATA.chart, svg = $('#chart'), wrap = svg.closest('.chartwrap');
   const L=54, R=48, T=14, phTop=222, gapTop=64, phBot=72, gapMid=28, phDD=64, botMargin=24;
   const H = T+phTop+gapTop+phBot+gapMid+phDD+botMargin;
   const dTop = T+phTop+gapTop+phBot+gapMid-6;
-  const pw = Math.max(700-L-R, (C.length-1)*PX_PER_DAY);
-  const W = L+R+pw;
-  const xs = i => L + pw*i/(C.length-1);
   const px = v => v.toFixed(1);
-
-  svg.setAttribute('viewBox', `0 0 ${px(W)} ${px(H)}`);
-  svg.style.width = `${px(W)}px`;
-  svg.style.height = 'auto';
+  const dateIdx = new Map(C.map((d,i)=>[d.d,i]));
 
   const vLo=Math.min(10,Math.min(...C.map(d=>d.vix))-1), vHi=Math.max(30,Math.max(...C.map(d=>d.vix))+1);
   const yV = v => T+phTop+gapTop + phBot - (v-vLo)/(vHi-vLo)*phBot;
-
-  const path = (acc,y) => C.map((d,i)=>`${i?'L':'M'}${px(xs(i))} ${px(y(acc(d)))}`).join(' ');
-  const dateIdx = new Map(C.map((d,i)=>[d.d,i]));
-
-  let out='';
-  // x축 연도 그리드 — 연도가 바뀌는 지점마다 세로선을 배경으로 깔아 스크롤 중에도 위치를 잃지 않게
-  let prevYear = null;
-  C.forEach((d,i)=>{
-    const yr = d.d.slice(0,4);
-    if(yr===prevYear) return;
-    prevYear = yr;
-    const x = xs(i);
-    out += `<line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(dTop+phDD)}" stroke="var(--line)" stroke-width="1" opacity=".45"/>`;
-    out += `<text x="${px(x+3)}" y="${H-6}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${yr}</text>`;
-  });
-  // 레버리지 축소 구간 음영
-  let run=null;
-  C.forEach((d,i)=>{
-    const off = d.st!=='UP_RISKON';
-    if(off && run===null) run=i;
-    if((!off||i===C.length-1) && run!==null){
-      const a=xs(run), b=xs(off?i:i-1);
-      out+=`<rect x="${px(a)}" y="${T}" width="${px(Math.max(b-a,1.5))}" height="${phTop}" fill="var(--panel-2)" opacity=".85"/>`;
-      run=null;
-    }
-  });
-  // 가격 패널(지수·250일선)은 스크롤 중 "지금 보이는 구간"의 고저에 맞춰 y축을 다시 잡는다 —
-  // 35년 전체 기준 고정축을 쓰면 최근 몇 달은 거의 직선으로 눌려 보이기 때문. (증권사 차트처럼 동작)
-  out += `<g id="pxDynamic"></g>`;
-
-  // 신호 변경일 표기 — 세로선으로 전 패널을 관통시켜 위치를 짚고, 여유 있는 구간은 날짜까지 적는다.
-  // (몰려있는 구간은 라벨을 건너뛰지만 세로선, 호버 시 정확한 날짜는 항상 남는다 — 점은 가격축과 함께 동적으로 그려짐)
-  let lastLabelX = -Infinity;
-  const MIN_LABEL_GAP = 22;
-  (DATA.changes||[]).forEach(c=>{
-    const i = dateIdx.get(c.signal_date);
-    if(i===undefined) return;
-    const x = xs(i), tone = STATE_TONE[c.to] || 'var(--ink-3)';
-    out += `<g><line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(dTop+phDD)}" stroke="${tone}" stroke-width="1" stroke-dasharray="1.5 2" opacity=".55"/>`
-         + `<title>${dstr(c.signal_date)} · ${STATE_KO[c.from]} → ${STATE_KO[c.to]} (${c.to_alloc})</title></g>`;
-    if(x - lastLabelX >= MIN_LABEL_GAP){
-      const ly = T+phTop+6;
-      out += `<text x="${px(x+3)}" y="${px(ly)}" transform="rotate(90 ${px(x+3)} ${px(ly)})"
-        font-family="var(--mono)" font-size="8.5" fill="${tone}">${dstr(c.signal_date)}</text>`;
-      lastLabelX = x;
-    }
-  });
-  // VIX 패널
-  out+=`<line x1="${L}" y1="${px(yV(vLo))}" x2="${L+pw}" y2="${px(yV(vLo))}" stroke="var(--line)"/>`;
-  [DATA.params.vix_down_threshold, DATA.params.vix_up_threshold].forEach(t=>{
-    if(t<vLo||t>vHi) return;
-    out+=`<line x1="${L}" y1="${px(yV(t))}" x2="${L+pw}" y2="${px(yV(t))}" stroke="var(--crit)" stroke-width="1" stroke-dasharray="3 3" opacity=".55"/>`;
-    out+=`<text x="${L-8}" y="${px(yV(t)+3.5)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${t}</text>`;
-  });
-  out+=`<path d="${path(d=>d.vix,yV)}" fill="none" stroke="var(--warn)" stroke-width="1.7"/>`;
-  out+=`<text x="${L-8}" y="${px(yV(vHi)+9)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">VIX10</text>`;
-
-  // 낙폭 패널 (0% 기준선에서 아래로) — dTop 은 위에서 이미 계산해 뒀다 (신호 세로선 높이에도 씀)
   const dLo=Math.min(-14, Math.min(...C.map(d=>d.dd))-2);
   const yD = v => dTop + (0-v)/(0-dLo)*phDD;
-  out+=`<path d="${C.map((d,i)=>`${i?'L':'M'}${px(xs(i))} ${px(yD(d.dd))}`).join(' ')} L ${px(xs(C.length-1))} ${px(dTop)} L ${px(xs(0))} ${px(dTop)} Z" fill="var(--crit-soft)"/>`;
-  out+=`<path d="${C.map((d,i)=>`${i?'L':'M'}${px(xs(i))} ${px(yD(d.dd))}`).join(' ')}" fill="none" stroke="var(--crit)" stroke-width="1.3" opacity=".8"/>`;
-  out+=`<line x1="${L}" y1="${px(dTop)}" x2="${L+pw}" y2="${px(dTop)}" stroke="var(--line-strong)"/>`;
-  const dthr=DATA.params.dd_threshold*100;
-  out+=`<line x1="${L}" y1="${px(yD(dthr))}" x2="${L+pw}" y2="${px(yD(dthr))}" stroke="var(--crit)" stroke-width="1" stroke-dasharray="3 3"/>`;
-  out+=`<text x="${L-8}" y="${px(yD(dthr)+3.5)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${dthr}%</text>`;
-  out+=`<text x="${L-8}" y="${px(dTop+3.5)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">0%</text>`;
-  out+=`<text x="${L-8}" y="${px(dTop+11)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">낙폭</text>`;
 
-  svg.innerHTML=out;
+  // 마우스 휠로 좌우 확대·축소 — 값은 "거래일당 몇 픽셀". 시프트+휠/트랙패드 좌우 스와이프는 그대로 패닝.
+  const ZOOM_LEVELS = [0.6, 1, 1.6, 2, 3, 5, 8, 13, 20, 32];
+  let zoomIdx = 4; // 3px/거래일 — 기존 기본 밀도
+  let pw, W, xs;
+  function computeGeom(){
+    const pxPerDay = ZOOM_LEVELS[zoomIdx];
+    pw = Math.max(700-L-R, (C.length-1)*pxPerDay);
+    W = L+R+pw;
+    xs = i => L + pw*i/(C.length-1);
+  }
+  const path = (acc,y) => C.map((d,i)=>`${i?'L':'M'}${px(xs(i))} ${px(y(acc(d)))}`).join(' ');
+
+  // 왼쪽에 고정해 두는 y축 라벨(가격 패널 제외) — 스크롤/줌 때마다 이 그룹의 transform만 옮긴다
+  function fixedLabel(y, text, anchor){
+    const a = anchor||'start', tx = a==='start' ? 4 : -4;
+    return `<rect x="${a==='start'?0:-46}" y="${px(y-9)}" width="46" height="14" fill="var(--panel)" opacity=".82"/>`
+         + `<text x="${px(tx)}" y="${px(y+3.5)}" text-anchor="${a}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${text}</text>`;
+  }
+  function updateFixedLabels(){
+    const g = $('#fixedLabels');
+    if(g) g.setAttribute('transform', `translate(${px(wrap.scrollLeft)},0)`);
+  }
+
+  function buildStatic(){
+    let out='';
+    // x축 연도 그리드
+    let prevYear = null;
+    C.forEach((d,i)=>{
+      const yr = d.d.slice(0,4);
+      if(yr===prevYear) return;
+      prevYear = yr;
+      const x = xs(i);
+      out += `<line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(dTop+phDD)}" stroke="var(--line)" stroke-width="1" opacity=".45"/>`;
+      out += `<text x="${px(x+3)}" y="${H-6}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${yr}</text>`;
+    });
+    // 레버리지 축소 구간 음영
+    let run=null;
+    C.forEach((d,i)=>{
+      const off = d.st!=='UP_RISKON';
+      if(off && run===null) run=i;
+      if((!off||i===C.length-1) && run!==null){
+        const a=xs(run), b=xs(off?i:i-1);
+        out+=`<rect x="${px(a)}" y="${T}" width="${px(Math.max(b-a,1.5))}" height="${phTop}" fill="var(--panel-2)" opacity=".85"/>`;
+        run=null;
+      }
+    });
+    // 가격 패널은 스크롤 중 "지금 보이는 구간"의 고저에 맞춰 y축을 다시 잡는다 (증권사 차트처럼)
+    out += `<g id="pxDynamic"></g>`;
+
+    // 신호 변경일 — 세로선으로 전 패널을 관통시켜 짚고, 여유 있는 구간은 날짜까지 적는다
+    let lastLabelX = -Infinity;
+    const MIN_LABEL_GAP = 22;
+    (DATA.changes||[]).forEach(c=>{
+      const i = dateIdx.get(c.signal_date);
+      if(i===undefined) return;
+      const x = xs(i), tone = STATE_TONE[c.to] || 'var(--ink-3)';
+      out += `<g><line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(dTop+phDD)}" stroke="${tone}" stroke-width="1" stroke-dasharray="1.5 2" opacity=".55"/>`
+           + `<title>${dstr(c.signal_date)} · ${STATE_KO[c.from]} → ${STATE_KO[c.to]} (${c.to_alloc})</title></g>`;
+      if(x - lastLabelX >= MIN_LABEL_GAP){
+        const ly = T+phTop+6;
+        out += `<text x="${px(x+3)}" y="${px(ly)}" transform="rotate(90 ${px(x+3)} ${px(ly)})"
+          font-family="var(--mono)" font-size="8.5" fill="${tone}">${dstr(c.signal_date)}</text>`;
+        lastLabelX = x;
+      }
+    });
+
+    // 왼쪽 고정 라벨(VIX·낙폭) — 스크롤해도 항상 보이도록 별도 그룹으로 묶는다
+    let fixed = '';
+    fixed += `<line x1="${px(L)}" y1="${px(yV(vLo))}" x2="${px(L+pw)}" y2="${px(yV(vLo))}" stroke="var(--line)"/>`;
+    [DATA.params.vix_down_threshold, DATA.params.vix_up_threshold].forEach(t=>{
+      if(t<vLo||t>vHi) return;
+      out+=`<line x1="${px(L)}" y1="${px(yV(t))}" x2="${px(L+pw)}" y2="${px(yV(t))}" stroke="var(--crit)" stroke-width="1" stroke-dasharray="3 3" opacity=".55"/>`;
+      fixed += fixedLabel(yV(t)+3.5, `${t}`);
+    });
+    out+=`<path d="${path(d=>d.vix,yV)}" fill="none" stroke="var(--warn)" stroke-width="1.7"/>`;
+    fixed += fixedLabel(yV(vHi)+9, 'VIX10');
+
+    // 낙폭 패널
+    const ddLine = path(d=>d.dd,yD);
+    out+=`<path d="${ddLine} L ${px(xs(C.length-1))} ${px(dTop)} L ${px(xs(0))} ${px(dTop)} Z" fill="var(--crit-soft)"/>`;
+    out+=`<path d="${ddLine}" fill="none" stroke="var(--crit)" stroke-width="1.3" opacity=".8"/>`;
+    out+=`<line x1="${px(L)}" y1="${px(dTop)}" x2="${px(L+pw)}" y2="${px(dTop)}" stroke="var(--line-strong)"/>`;
+    const dthr=DATA.params.dd_threshold*100;
+    out+=`<line x1="${px(L)}" y1="${px(yD(dthr))}" x2="${px(L+pw)}" y2="${px(yD(dthr))}" stroke="var(--crit)" stroke-width="1" stroke-dasharray="3 3"/>`;
+    fixed += fixedLabel(yD(dthr)+3.5, `${dthr}%`);
+    fixed += fixedLabel(dTop+3.5, '0%');
+    fixed += fixedLabel(dTop+11, '낙폭');
+
+    out += `<g id="fixedLabels">${fixed}</g>`;
+    return out;
+  }
 
   // ── 가격 패널 동적 재조정 ──
   // 지금 스크롤로 보이는 구간의 지수·250일선 값만 놓고 y축 고저를 다시 잡는다.
   // (경로 문자열은 보이는 구간 근처만 다시 만들어서 가볍게 유지한다 — 9,000개를 매번 다 그리지 않는다)
-  const wrap = svg.closest('.chartwrap');
-  const pxDynamic = $('#pxDynamic');
+  let pxDynamic;
   function visibleIdxRange(){
     const x0 = wrap.scrollLeft - 40, x1 = wrap.scrollLeft + wrap.clientWidth + 40;
     const i0 = Math.max(0, Math.floor((x0-L)*(C.length-1)/pw));
@@ -443,10 +458,12 @@ $('#caution').innerHTML = DATA.caution || '';
     const seg = acc => slice.map((d,k)=>`${k?'L':'M'}${px(xs(i0+k))} ${px(yPd(acc(d)))}`).join(' ');
 
     let g='';
+    const lx = wrap.scrollLeft + 4;
     for(let k=0;k<=3;k++){
       const v = Math.exp(lo+(hi-lo)*k/3), y=yPd(v);
       g+=`<line x1="${px(L)}" y1="${px(y)}" x2="${px(L+pw)}" y2="${px(y)}" stroke="var(--line)" stroke-width="1"/>`;
-      g+=`<text x="${px(L-8)}" y="${px(y+3.5)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${Math.round(v).toLocaleString()}</text>`;
+      g+=`<rect x="${px(lx-4)}" y="${px(y-7)}" width="50" height="14" fill="var(--panel)" opacity=".82"/>`;
+      g+=`<text x="${px(lx)}" y="${px(y+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${Math.round(v).toLocaleString()}</text>`;
     }
     g+=`<path d="${seg(d=>d.sma)}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="4 3"/>`;
     g+=`<path d="${seg(d=>d.ndx)}" fill="none" stroke="var(--ink)" stroke-width="1.9" stroke-linejoin="round"/>`;
@@ -461,13 +478,56 @@ $('#caution').innerHTML = DATA.caution || '';
     });
     pxDynamic.innerHTML = g;
   }
+
+  function rebuild(){
+    computeGeom();
+    svg.setAttribute('viewBox', `0 0 ${px(W)} ${px(H)}`);
+    svg.style.width = `${px(W)}px`;
+    svg.style.height = 'auto';
+    svg.innerHTML = buildStatic();
+    pxDynamic = $('#pxDynamic');
+  }
+
+  rebuild();
+  renderPriceDynamic();
+  updateFixedLabels();
+
   let ticking=false;
   wrap.addEventListener('scroll', ()=>{
     if(ticking) return;
     ticking=true;
-    requestAnimationFrame(()=>{ renderPriceDynamic(); ticking=false; });
+    requestAnimationFrame(()=>{ renderPriceDynamic(); updateFixedLabels(); ticking=false; });
   }, {passive:true});
-  window.addEventListener('resize', renderPriceDynamic);
-  renderPriceDynamic();
+  window.addEventListener('resize', ()=>{ renderPriceDynamic(); updateFixedLabels(); });
+
+  // ── 마우스 휠 확대/축소 (커서 아래 지점을 고정한 채 줌) ──
+  let wheelAccum=0, pendingZoom=false;
+  wrap.addEventListener('wheel', (e)=>{
+    if(e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // 좌우 스와이프·시프트+휠은 그대로 패닝
+    e.preventDefault();
+    wheelAccum += e.deltaY;
+    const STEP=70;
+    let changed=false;
+    while(Math.abs(wheelAccum) >= STEP){
+      const dir = wheelAccum>0 ? -1 : 1; // 아래로 굴리면 축소(기간을 넓게), 위로 굴리면 확대
+      const next = Math.max(0, Math.min(ZOOM_LEVELS.length-1, zoomIdx+dir));
+      if(next!==zoomIdx){ zoomIdx=next; changed=true; }
+      wheelAccum += wheelAccum>0 ? -STEP : STEP;
+    }
+    if(!changed || pendingZoom) return;
+    pendingZoom=true;
+    const rect = wrap.getBoundingClientRect();
+    const cursorOffset = e.clientX - rect.left;
+    const cursorSvgX = wrap.scrollLeft + cursorOffset;
+    const idxUnderCursor = Math.max(0, Math.min(C.length-1, (cursorSvgX-L)*(C.length-1)/pw));
+    requestAnimationFrame(()=>{
+      rebuild();
+      const newX = xs(idxUnderCursor);
+      wrap.scrollLeft = Math.max(0, newX - cursorOffset);
+      renderPriceDynamic();
+      updateFixedLabels();
+      pendingZoom=false;
+    });
+  }, {passive:false});
 })();
 </script>
