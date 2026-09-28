@@ -355,14 +355,9 @@ $('#caution').innerHTML = DATA.caution || '';
   let phDD  = clamp(loadPref('phDD', 64), MIN_PANEL_H, MAX_PANEL_H);
   let H, dTop;
 
-  const vLo=Math.min(10,Math.min(...C.map(d=>d.vix))-1), vHi=Math.max(30,Math.max(...C.map(d=>d.vix))+1);
-  const dLo=Math.min(-14, Math.min(...C.map(d=>d.dd))-2);
-  let yV, yD;
   function computeLayout(){
     H = T+phTop+gapTop+phBot+gapMid+phDD+botMargin;
     dTop = T+phTop+gapTop+phBot+gapMid-6;
-    yV = v => T+phTop+gapTop + phBot - (v-vLo)/(vHi-vLo)*phBot;
-    yD = v => dTop + (0-v)/(0-dLo)*phDD;
   }
 
   // 마우스 휠로 좌우 확대·축소 — 값은 "거래일당 몇 픽셀". 시프트+휠/트랙패드 좌우 스와이프는 그대로 패닝.
@@ -448,27 +443,14 @@ $('#caution').innerHTML = DATA.caution || '';
       }
     });
 
-    // 왼쪽 고정 라벨(VIX·낙폭) — 스크롤해도 항상 보이도록 별도 그룹으로 묶는다
-    let fixed = '';
-    fixed += `<line x1="${px(L)}" y1="${px(yV(vLo))}" x2="${px(L+pw)}" y2="${px(yV(vLo))}" stroke="var(--line)"/>`;
-    [DATA.params.vix_down_threshold, DATA.params.vix_up_threshold].forEach(t=>{
-      if(t<vLo||t>vHi) return;
-      out+=`<line x1="${px(L)}" y1="${px(yV(t))}" x2="${px(L+pw)}" y2="${px(yV(t))}" stroke="var(--crit)" stroke-width="1" stroke-dasharray="3 3" opacity=".55"/>`;
-      fixed += fixedLabel(yV(t)+3.5, `${t}`);
-    });
-    out+=`<path d="${path(d=>d.vix,yV)}" fill="none" stroke="var(--warn)" stroke-width="1.7"/>`;
-    fixed += fixedLabel(yV(vHi)+9, 'VIX10');
+    // VIX·낙폭 패널도 가격 패널처럼 "지금 보이는 구간"의 고저에 맞춰 y축을 다시 잡는다
+    out += `<g id="vixDynamic"></g>`;
+    out += `<g id="ddDynamic"></g>`;
 
-    // 낙폭 패널
-    const ddLine = path(d=>d.dd,yD);
-    out+=`<path d="${ddLine} L ${px(xs(C.length-1))} ${px(dTop)} L ${px(xs(0))} ${px(dTop)} Z" fill="var(--crit-soft)"/>`;
-    out+=`<path d="${ddLine}" fill="none" stroke="var(--crit)" stroke-width="1.3" opacity=".8"/>`;
-    out+=`<line x1="${px(L)}" y1="${px(dTop)}" x2="${px(L+pw)}" y2="${px(dTop)}" stroke="var(--line-strong)"/>`;
-    const dthr=DATA.params.dd_threshold*100;
-    out+=`<line x1="${px(L)}" y1="${px(yD(dthr))}" x2="${px(L+pw)}" y2="${px(yD(dthr))}" stroke="var(--crit)" stroke-width="1" stroke-dasharray="3 3"/>`;
-    fixed += fixedLabel(yD(dthr)+3.5, `${dthr}%`);
-    fixed += fixedLabel(dTop+3.5, '0%');
-    fixed += fixedLabel(dTop+11, '낙폭');
+    // 왼쪽 고정 라벨(패널 제목만 — 값 라벨은 축 자체가 움직이므로 동적 렌더에서 그린다)
+    let fixed = '';
+    fixed += fixedLabel(T+phTop+gapTop-10, 'VIX10');
+    fixed += fixedLabel(dTop-10, '낙폭');
 
     out += `<g id="fixedLabels">${fixed}</g>`;
     out += buildResizeHandles();
@@ -517,6 +499,85 @@ $('#caution').innerHTML = DATA.caution || '';
     pxDynamic.innerHTML = g;
   }
 
+  // VIX·낙폭도 같은 방식: 보이는 구간에 실제로 찍힌 값만 놓고 고저를 다시 잡는다.
+  // 문턱선(28/18, -9%)은 그 구간의 실제 값 범위에는 반영하지 않고, 계산된 범위 안에 들어올 때만 그려준다 —
+  // 문턱을 억지로 범위에 끼워 넣으면 조용한 구간에서도 축이 넓게 고정돼 버려 다시 "거의 직선"이 된다.
+  let vixDynamic, ddDynamic;
+  function renderVixDynamic(){
+    const [i0,i1] = visibleIdxRange();
+    const slice = C.slice(i0, i1+1);
+    const vals = slice.map(d=>d.vix);
+    let vlo = Math.min(...vals), vhi = Math.max(...vals);
+    const pad = (vhi-vlo)*0.15 || 1; vlo -= pad; vhi += pad;
+    const yVd = v => T+phTop+gapTop + phBot - (v-vlo)/(vhi-vlo)*phBot;
+    const seg = slice.map((d,k)=>`${k?'L':'M'}${px(xs(i0+k))} ${px(yVd(d.vix))}`).join(' ');
+
+    let g='';
+    const lx = wrap.scrollLeft + 4;
+    g += `<line x1="${px(L)}" y1="${px(yVd(vlo))}" x2="${px(L+pw)}" y2="${px(yVd(vlo))}" stroke="var(--line)"/>`;
+    [DATA.params.vix_down_threshold, DATA.params.vix_up_threshold].forEach(t=>{
+      if(t<vlo || t>vhi) return;
+      const y = yVd(t);
+      g += `<line x1="${px(L)}" y1="${px(y)}" x2="${px(L+pw)}" y2="${px(y)}" stroke="var(--crit)" stroke-width="1" stroke-dasharray="3 3" opacity=".55"/>`;
+      g += `<rect x="${px(lx-4)}" y="${px(y-7)}" width="46" height="14" fill="var(--panel)" opacity=".82"/>`;
+      g += `<text x="${px(lx)}" y="${px(y+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${t}</text>`;
+    });
+    g += `<path d="${seg}" fill="none" stroke="var(--warn)" stroke-width="1.7"/>`;
+    if(i1===C.length-1){
+      g += `<circle cx="${px(xs(C.length-1))}" cy="${px(yVd(C[C.length-1].vix))}" r="3" fill="var(--warn)"/>`;
+    }
+    // 지금 구간의 고·저값도 숫자로 밝혀 둔다
+    g += `<rect x="${px(lx-4)}" y="${px(yVd(vhi-pad)-7)}" width="46" height="14" fill="var(--panel)" opacity=".82"/>`;
+    g += `<text x="${px(lx)}" y="${px(yVd(vhi-pad)+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${(vhi-pad).toFixed(1)}</text>`;
+    vixDynamic.innerHTML = g;
+  }
+  function renderDdDynamic(){
+    const [i0,i1] = visibleIdxRange();
+    const slice = C.slice(i0, i1+1);
+    const vals = slice.map(d=>d.dd);
+    // 낙폭도 VIX·가격과 똑같이 "이 구간에서 실제로 찍힌 최고·최저"에 맞춰 위아래 모두 다시 잡는다.
+    // (0%를 항상 천장으로 고정해두면, 오래 이어지는 깊은 하락장 구간에서는 정작 그 구간의 진짜
+    //  등락이 패널 맨 아래 좁은 틈에 몰려서 또 거의 직선으로 보이게 된다.)
+    let ddlo = Math.min(...vals), ddhi = Math.max(...vals);
+    const pad = (ddhi-ddlo)*0.15 || 0.3; ddlo -= pad; ddhi += pad;
+    const yDd = v => dTop + (ddhi-v)/(ddhi-ddlo)*phDD;
+    const ddLine = slice.map((d,k)=>`${k?'L':'M'}${px(xs(i0+k))} ${px(yDd(d.dd))}`).join(' ');
+    const yTop = yDd(ddhi), yBot = yDd(ddlo);
+
+    let g='';
+    const lx = wrap.scrollLeft + 4;
+    g += `<path d="${ddLine} L ${px(xs(i1))} ${px(yTop)} L ${px(xs(i0))} ${px(yTop)} Z" fill="var(--crit-soft)"/>`;
+    g += `<path d="${ddLine}" fill="none" stroke="var(--crit)" stroke-width="1.3" opacity=".8"/>`;
+    g += `<line x1="${px(L)}" y1="${px(yBot)}" x2="${px(L+pw)}" y2="${px(yBot)}" stroke="var(--line)"/>`;
+    if(0<=ddhi && 0>=ddlo){
+      const y0 = yDd(0);
+      g += `<line x1="${px(L)}" y1="${px(y0)}" x2="${px(L+pw)}" y2="${px(y0)}" stroke="var(--line-strong)" stroke-dasharray="2 2" opacity=".7"/>`;
+      g += `<rect x="${px(lx-4)}" y="${px(y0-7)}" width="46" height="14" fill="var(--panel)" opacity=".82"/>`;
+      g += `<text x="${px(lx)}" y="${px(y0+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">0%</text>`;
+    }
+    const dthr = DATA.params.dd_threshold*100;
+    if(dthr<=ddhi && dthr>=ddlo){
+      const yThr = yDd(dthr);
+      g += `<line x1="${px(L)}" y1="${px(yThr)}" x2="${px(L+pw)}" y2="${px(yThr)}" stroke="var(--crit)" stroke-width="1" stroke-dasharray="3 3"/>`;
+      g += `<rect x="${px(lx-4)}" y="${px(yThr-7)}" width="46" height="14" fill="var(--panel)" opacity=".82"/>`;
+      g += `<text x="${px(lx)}" y="${px(yThr+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${dthr}%</text>`;
+    }
+    // 지금 구간의 고·저값도 숫자로 밝혀 둔다
+    g += `<rect x="${px(lx-4)}" y="${px(yTop-7)}" width="46" height="14" fill="var(--panel)" opacity=".82"/>`;
+    g += `<text x="${px(lx)}" y="${px(yTop+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${(ddhi-pad).toFixed(1)}%</text>`;
+    g += `<rect x="${px(lx-4)}" y="${px(yBot-7)}" width="46" height="14" fill="var(--panel)" opacity=".82"/>`;
+    g += `<text x="${px(lx)}" y="${px(yBot+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${(ddlo+pad).toFixed(1)}%</text>`;
+    if(i1===C.length-1){
+      g += `<circle cx="${px(xs(C.length-1))}" cy="${px(yDd(C[C.length-1].dd))}" r="3" fill="var(--crit)"/>`;
+    }
+    ddDynamic.innerHTML = g;
+  }
+  function renderDynamic(){
+    renderPriceDynamic();
+    renderVixDynamic();
+    renderDdDynamic();
+  }
+
   function rebuild(){
     computeGeom();
     computeLayout();
@@ -525,19 +586,21 @@ $('#caution').innerHTML = DATA.caution || '';
     svg.style.height = 'auto';
     svg.innerHTML = buildStatic();
     pxDynamic = $('#pxDynamic');
+    vixDynamic = $('#vixDynamic');
+    ddDynamic = $('#ddDynamic');
   }
 
   rebuild();
-  renderPriceDynamic();
+  renderDynamic();
   updateStickyX();
 
   let ticking=false;
   wrap.addEventListener('scroll', ()=>{
     if(ticking) return;
     ticking=true;
-    requestAnimationFrame(()=>{ renderPriceDynamic(); updateStickyX(); ticking=false; });
+    requestAnimationFrame(()=>{ renderDynamic(); updateStickyX(); ticking=false; });
   }, {passive:true});
-  window.addEventListener('resize', ()=>{ renderPriceDynamic(); updateStickyX(); });
+  window.addEventListener('resize', ()=>{ renderDynamic(); updateStickyX(); });
 
   // ── 마우스 드래그로 좌우 이동 ──
   let dragging=false, dragX=0, dragScroll=0;
@@ -579,7 +642,7 @@ $('#caution').innerHTML = DATA.caution || '';
       if(resizeDrag.which==='vix') phBot = clamp(resizeDrag.startVix+dy, MIN_PANEL_H, MAX_PANEL_H);
       else phDD = clamp(resizeDrag.startDD+dy, MIN_PANEL_H, MAX_PANEL_H);
       rebuild();
-      renderPriceDynamic();
+      renderDynamic();
       updateStickyX();
       resizePending = false;
     });
@@ -616,7 +679,7 @@ $('#caution').innerHTML = DATA.caution || '';
       rebuild();
       const newX = xs(idxUnderCursor);
       wrap.scrollLeft = Math.max(0, newX - cursorOffset);
-      renderPriceDynamic();
+      renderDynamic();
       updateStickyX();
       pendingZoom=false;
     });
