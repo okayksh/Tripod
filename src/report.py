@@ -42,7 +42,7 @@ def build_payload(preset=None):
     chart = [{"d": r["date"], "ndx": round(r["ndx"], 2), "sma": round(r["sma"], 2),
               "vix": round(r["vix_ma"], 2), "dd": round(r["dd"] * 100, 2),
               "st": r["state"]}
-             for r in live[-CHART_DAYS:]]
+             for r in live]
 
     dist = distance_report(cur, p)
     # '타점 임박' 경보 — 어느 문턱이 가장 가까운가
@@ -95,7 +95,7 @@ def build_payload(preset=None):
         "prev_alloc_text": target_text(prev["target"]),
         "days_since_change": days_since,
         "last_change": last_change,
-        "changes": changes[-40:],
+        "changes": changes,
         "distance": {k: round(v, 3) for k, v in dist.items()},
         "watch": watch,
         "chart": chart,
