@@ -95,7 +95,7 @@ def build_payload(preset=None):
         "prev_alloc_text": target_text(prev["target"]),
         "days_since_change": days_since,
         "last_change": last_change,
-        "changes": changes[-40:],
+        "changes": changes,
         "distance": {k: round(v, 3) for k, v in dist.items()},
         "watch": watch,
         "chart": chart,
