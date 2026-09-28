@@ -113,6 +113,7 @@ td.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
            cursor:grab;user-select:none;-webkit-user-select:none}
 .chartwrap.dragging{cursor:grabbing}
 #chart{display:block;max-width:none}
+#chart .resize-handle:hover + line{opacity:1;stroke:var(--accent);stroke-width:1.5}
 .legend{display:flex;gap:16px;flex-wrap:wrap;padding:10px 18px 16px;font-size:11.5px;color:var(--ink-2);
         font-family:var(--mono)}
 .legend i{display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:5px}
@@ -177,7 +178,7 @@ footer b{color:var(--ink-2);font-weight:500}
   <section class="card">
     <div class="hd">
       <h2>35년 전체 &mdash; 지수와 250일선, 그리고 두 문턱</h2>
-      <span class="eyebrow">회색 음영 = 레버리지 축소 구간 · 점선 = 신호 변경일 · 좌우 스크롤, 마우스 휠로 확대/축소</span>
+      <span class="eyebrow">회색 음영 = 레버리지 축소 구간 · 점선 = 신호 변경일 · 좌우 스크롤/드래그, 휠로 확대·축소, 패널 경계 드래그로 높이 조절</span>
     </div>
     <div class="chartwrap"><svg id="chart" viewBox="0 0 1000 460" role="img"
       aria-label="1991년부터 현재까지 나스닥100 지수와 250일 이동평균, VIX 10일 평균, 52주 낙폭 추이. 좌우로 스크롤하고 마우스 휠로 확대·축소할 수 있음"></svg></div>
@@ -337,16 +338,32 @@ $('#caution').innerHTML = DATA.caution || '';
 /* ── 차트 ── */
 (function(){
   const C = DATA.chart, svg = $('#chart'), wrap = svg.closest('.chartwrap');
-  const L=54, R=48, T=14, phTop=222, gapTop=64, phBot=72, gapMid=28, phDD=64, botMargin=24;
-  const H = T+phTop+gapTop+phBot+gapMid+phDD+botMargin;
-  const dTop = T+phTop+gapTop+phBot+gapMid-6;
   const px = v => v.toFixed(1);
   const dateIdx = new Map(C.map((d,i)=>[d.d,i]));
 
+  // 사용자 설정(로컬 저장) — VIX·낙폭 패널 높이는 드래그로 조절, 다음 방문에도 기억한다
+  function loadPref(key, def){
+    try{ const v = parseFloat(localStorage.getItem('tripod_'+key)); return isFinite(v) ? v : def; }
+    catch(e){ return def; }
+  }
+  function savePref(key, val){ try{ localStorage.setItem('tripod_'+key, val); }catch(e){} }
+  const MIN_PANEL_H = 36, MAX_PANEL_H = 260;
+  const clamp = (v,lo,hi) => Math.max(lo, Math.min(hi, v));
+
+  const L=54, R=48, T=14, phTop=222, gapTop=64, gapMid=28, botMargin=24;
+  let phBot = clamp(loadPref('phBot', 72), MIN_PANEL_H, MAX_PANEL_H);
+  let phDD  = clamp(loadPref('phDD', 64), MIN_PANEL_H, MAX_PANEL_H);
+  let H, dTop;
+
   const vLo=Math.min(10,Math.min(...C.map(d=>d.vix))-1), vHi=Math.max(30,Math.max(...C.map(d=>d.vix))+1);
-  const yV = v => T+phTop+gapTop + phBot - (v-vLo)/(vHi-vLo)*phBot;
   const dLo=Math.min(-14, Math.min(...C.map(d=>d.dd))-2);
-  const yD = v => dTop + (0-v)/(0-dLo)*phDD;
+  let yV, yD;
+  function computeLayout(){
+    H = T+phTop+gapTop+phBot+gapMid+phDD+botMargin;
+    dTop = T+phTop+gapTop+phBot+gapMid-6;
+    yV = v => T+phTop+gapTop + phBot - (v-vLo)/(vHi-vLo)*phBot;
+    yD = v => dTop + (0-v)/(0-dLo)*phDD;
+  }
 
   // 마우스 휠로 좌우 확대·축소 — 값은 "거래일당 몇 픽셀". 시프트+휠/트랙패드 좌우 스와이프는 그대로 패닝.
   const ZOOM_LEVELS = [0.6, 1, 1.6, 2, 3, 5, 8, 13, 20, 32];
@@ -366,9 +383,22 @@ $('#caution').innerHTML = DATA.caution || '';
     return `<rect x="${a==='start'?0:-46}" y="${px(y-9)}" width="46" height="14" fill="var(--panel)" opacity=".82"/>`
          + `<text x="${px(tx)}" y="${px(y+3.5)}" text-anchor="${a}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${text}</text>`;
   }
-  function updateFixedLabels(){
-    const g = $('#fixedLabels');
-    if(g) g.setAttribute('transform', `translate(${px(wrap.scrollLeft)},0)`);
+  function updateStickyX(){
+    const tx = px(wrap.scrollLeft);
+    ['#fixedLabels','#resizeHandles'].forEach(sel=>{
+      const g = $(sel);
+      if(g) g.setAttribute('transform', `translate(${tx},0)`);
+    });
+  }
+  // VIX·낙폭 패널 경계에 놓는 드래그 핸들 — 화면에 보이는 폭만큼 만들어서 스크롤/줌 때 폭만 다시 잡으면 된다
+  function buildResizeHandles(){
+    const hw = Math.max(wrap.clientWidth + 400, 700);
+    const row = (y, id) =>
+      `<rect class="resize-handle" data-handle="${id}" x="0" y="${px(y-5)}" width="${px(hw)}" height="10" fill="transparent" pointer-events="all" style="cursor:row-resize"/>`
+    + `<line x1="0" y1="${px(y)}" x2="${px(hw)}" y2="${px(y)}" stroke="var(--line-strong)" stroke-width="1" stroke-dasharray="2 2" opacity=".6" pointer-events="none"/>`;
+    const h1 = T+phTop+gapTop+phBot; // VIX 패널 바닥 경계
+    const h2 = dTop+phDD;            // 낙폭 패널 바닥 경계(차트 전체 바닥)
+    return `<g id="resizeHandles">${row(h1,'vix')}${row(h2,'dd')}</g>`;
   }
 
   function buildStatic(){
@@ -397,14 +427,18 @@ $('#caution').innerHTML = DATA.caution || '';
     // 가격 패널은 스크롤 중 "지금 보이는 구간"의 고저에 맞춰 y축을 다시 잡는다 (증권사 차트처럼)
     out += `<g id="pxDynamic"></g>`;
 
-    // 신호 변경일 — 세로선으로 전 패널을 관통시켜 짚고, 여유 있는 구간은 날짜까지 적는다
+    // 신호 변경일 — 세로선으로 전 패널을 관통시켜 짚고, 여유 있는 구간은 날짜까지 적는다.
+    // 점선은 가늘어서(1px, 대시 간격까지 있어) 마우스로 정확히 맞히기 어려우므로,
+    // 투명하지만 pointer-events는 살아있는 넓은 히트존을 따로 깔아 호버가 항상 먹히게 한다.
     let lastLabelX = -Infinity;
     const MIN_LABEL_GAP = 22;
     (DATA.changes||[]).forEach(c=>{
       const i = dateIdx.get(c.signal_date);
       if(i===undefined) return;
       const x = xs(i), tone = STATE_TONE[c.to] || 'var(--ink-3)';
-      out += `<g><line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(dTop+phDD)}" stroke="${tone}" stroke-width="1" stroke-dasharray="1.5 2" opacity=".55"/>`
+      out += `<g>`
+           + `<rect x="${px(x-4)}" y="${px(T)}" width="8" height="${px(dTop+phDD-T)}" fill="transparent" pointer-events="all"/>`
+           + `<line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(dTop+phDD)}" stroke="${tone}" stroke-width="1" stroke-dasharray="1.5 2" opacity=".55"/>`
            + `<title>${dstr(c.signal_date)} · ${STATE_KO[c.from]} → ${STATE_KO[c.to]} (${c.to_alloc})</title></g>`;
       if(x - lastLabelX >= MIN_LABEL_GAP){
         const ly = T+phTop+6;
@@ -437,6 +471,7 @@ $('#caution').innerHTML = DATA.caution || '';
     fixed += fixedLabel(dTop+11, '낙폭');
 
     out += `<g id="fixedLabels">${fixed}</g>`;
+    out += buildResizeHandles();
     return out;
   }
 
@@ -476,13 +511,15 @@ $('#caution').innerHTML = DATA.caution || '';
       const i = dateIdx.get(c.signal_date);
       if(i===undefined || i<i0 || i>i1) return;
       const tone = STATE_TONE[c.to] || 'var(--ink-3)';
-      g+=`<circle cx="${px(xs(i))}" cy="${px(yPd(C[i].ndx))}" r="2.6" fill="${tone}"/>`;
+      g+=`<circle cx="${px(xs(i))}" cy="${px(yPd(C[i].ndx))}" r="4" fill="${tone}" pointer-events="all">`
+       + `<title>${dstr(c.signal_date)} · ${STATE_KO[c.from]} → ${STATE_KO[c.to]} (${c.to_alloc})</title></circle>`;
     });
     pxDynamic.innerHTML = g;
   }
 
   function rebuild(){
     computeGeom();
+    computeLayout();
     svg.setAttribute('viewBox', `0 0 ${px(W)} ${px(H)}`);
     svg.style.width = `${px(W)}px`;
     svg.style.height = 'auto';
@@ -492,20 +529,21 @@ $('#caution').innerHTML = DATA.caution || '';
 
   rebuild();
   renderPriceDynamic();
-  updateFixedLabels();
+  updateStickyX();
 
   let ticking=false;
   wrap.addEventListener('scroll', ()=>{
     if(ticking) return;
     ticking=true;
-    requestAnimationFrame(()=>{ renderPriceDynamic(); updateFixedLabels(); ticking=false; });
+    requestAnimationFrame(()=>{ renderPriceDynamic(); updateStickyX(); ticking=false; });
   }, {passive:true});
-  window.addEventListener('resize', ()=>{ renderPriceDynamic(); updateFixedLabels(); });
+  window.addEventListener('resize', ()=>{ renderPriceDynamic(); updateStickyX(); });
 
   // ── 마우스 드래그로 좌우 이동 ──
   let dragging=false, dragX=0, dragScroll=0;
   wrap.addEventListener('mousedown', (e)=>{
     if(e.button !== 0) return; // 좌클릭만
+    if(e.target.closest('.resize-handle')) return; // 높이 조절 핸들은 아래에서 따로 처리
     dragging = true;
     dragX = e.clientX; dragScroll = wrap.scrollLeft;
     wrap.classList.add('dragging');
@@ -519,6 +557,39 @@ $('#caution').innerHTML = DATA.caution || '';
     if(!dragging) return;
     dragging = false;
     wrap.classList.remove('dragging');
+  });
+
+  // ── VIX·낙폭 패널 높이 드래그 조절 ──
+  let resizeDrag=null, resizePending=false;
+  svg.addEventListener('mousedown', (e)=>{
+    const t = e.target.closest('.resize-handle');
+    if(!t) return;
+    resizeDrag = { which: t.dataset.handle, startY: e.clientY, curY: e.clientY, startVix: phBot, startDD: phDD };
+    document.body.style.cursor = 'row-resize';
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e)=>{
+    if(!resizeDrag) return;
+    resizeDrag.curY = e.clientY;
+    if(resizePending) return;
+    resizePending = true;
+    requestAnimationFrame(()=>{
+      if(!resizeDrag){ resizePending=false; return; }
+      const dy = resizeDrag.curY - resizeDrag.startY;
+      if(resizeDrag.which==='vix') phBot = clamp(resizeDrag.startVix+dy, MIN_PANEL_H, MAX_PANEL_H);
+      else phDD = clamp(resizeDrag.startDD+dy, MIN_PANEL_H, MAX_PANEL_H);
+      rebuild();
+      renderPriceDynamic();
+      updateStickyX();
+      resizePending = false;
+    });
+  });
+  window.addEventListener('mouseup', ()=>{
+    if(!resizeDrag) return;
+    savePref('phBot', phBot);
+    savePref('phDD', phDD);
+    resizeDrag = null;
+    document.body.style.cursor = '';
   });
 
   // ── 마우스 휠 확대/축소 (커서 아래 지점을 고정한 채 줌) ──
@@ -546,7 +617,7 @@ $('#caution').innerHTML = DATA.caution || '';
       const newX = xs(idxUnderCursor);
       wrap.scrollLeft = Math.max(0, newX - cursorOffset);
       renderPriceDynamic();
-      updateFixedLabels();
+      updateStickyX();
       pendingZoom=false;
     });
   }, {passive:false});
