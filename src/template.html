@@ -109,8 +109,8 @@ td.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .p-cash{background:var(--crit-soft);color:var(--crit)}
 
 /* ── 차트 ───────────────────────────────── */
-.chartwrap{padding:6px 6px 0}
-svg{display:block;width:100%;height:auto}
+.chartwrap{padding:6px 6px 0;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+#chart{display:block;max-width:none}
 .legend{display:flex;gap:16px;flex-wrap:wrap;padding:10px 18px 16px;font-size:11.5px;color:var(--ink-2);
         font-family:var(--mono)}
 .legend i{display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:5px}
@@ -174,16 +174,17 @@ footer b{color:var(--ink-2);font-weight:500}
 
   <section class="card">
     <div class="hd">
-      <h2>최근 1년 &mdash; 지수와 250일선, 그리고 두 문턱</h2>
-      <span class="eyebrow">회색 음영 = 레버리지 축소 구간</span>
+      <h2>35년 전체 &mdash; 지수와 250일선, 그리고 두 문턱</h2>
+      <span class="eyebrow">회색 음영 = 레버리지 축소 구간 · 점선 = 신호 변경일 (좌우로 스크롤)</span>
     </div>
     <div class="chartwrap"><svg id="chart" viewBox="0 0 1000 460" role="img"
-      aria-label="나스닥100 지수와 250일 이동평균, VIX 10일 평균, 52주 낙폭 추이"></svg></div>
+      aria-label="1991년부터 현재까지 나스닥100 지수와 250일 이동평균, VIX 10일 평균, 52주 낙폭 추이. 좌우로 스크롤해서 볼 수 있음"></svg></div>
     <div class="legend">
       <span><i style="background:var(--ink)"></i>NDX</span>
       <span><i style="background:var(--accent)"></i>250일선</span>
       <span><i style="background:var(--warn)"></i>VIX 10일 평균</span>
       <span><i style="background:var(--crit)"></i>52주 고점 대비 낙폭</span>
+      <span><i style="background:var(--ink-3)"></i>점선 = 신호 변경일 (마우스를 올리면 날짜 표시)</span>
     </div>
   </section>
 
@@ -334,21 +335,42 @@ $('#caution').innerHTML = DATA.caution || '';
 /* ── 차트 ── */
 (function(){
   const C = DATA.chart, svg = $('#chart');
-  const W=1000, H=460, L=54, R=48, T=14;
-  const pw=W-L-R, phTop=222, phBot=72, phDD=64, gapY=32;
+  // 35년치를 한 화면에 욱여넣지 않고, 거래일당 일정 폭을 줘서 좌우로 스크롤해서 본다.
+  const PX_PER_DAY = 3;
+  const L=54, R=48, T=14, phTop=222, gapTop=64, phBot=72, gapMid=28, phDD=64, botMargin=24;
+  const H = T+phTop+gapTop+phBot+gapMid+phDD+botMargin;
+  const dTop = T+phTop+gapTop+phBot+gapMid-6;
+  const pw = Math.max(700-L-R, (C.length-1)*PX_PER_DAY);
+  const W = L+R+pw;
   const xs = i => L + pw*i/(C.length-1);
   const px = v => v.toFixed(1);
 
+  svg.setAttribute('viewBox', `0 0 ${px(W)} ${px(H)}`);
+  svg.style.width = `${px(W)}px`;
+  svg.style.height = 'auto';
+
+  // 35년치 데이터는 지수·저점 배율 차이가 커서 로그축을 쓴다 (선형이면 초반 구간이 바닥에 눌려 안 보인다).
   const allP = C.flatMap(d=>[d.ndx,d.sma]);
-  let lo=Math.min(...allP), hi=Math.max(...allP); const pad=(hi-lo)*0.10; lo-=pad; hi+=pad;
-  const yP = v => T + phTop - (v-lo)/(hi-lo)*phTop;
+  let loL=Math.log(Math.min(...allP)), hiL=Math.log(Math.max(...allP));
+  const padL=(hiL-loL)*0.06; loL-=padL; hiL+=padL;
+  const yP = v => T + phTop - (Math.log(v)-loL)/(hiL-loL)*phTop;
 
   const vLo=Math.min(10,Math.min(...C.map(d=>d.vix))-1), vHi=Math.max(30,Math.max(...C.map(d=>d.vix))+1);
-  const yV = v => T+phTop+gapY + phBot - (v-vLo)/(vHi-vLo)*phBot;
+  const yV = v => T+phTop+gapTop + phBot - (v-vLo)/(vHi-vLo)*phBot;
 
   const path = (acc,y) => C.map((d,i)=>`${i?'L':'M'}${px(xs(i))} ${px(y(acc(d)))}`).join(' ');
 
   let out='';
+  // x축 연도 그리드 — 연도가 바뀌는 지점마다 세로선을 배경으로 깔아 스크롤 중에도 위치를 잃지 않게
+  let prevYear = null;
+  C.forEach((d,i)=>{
+    const yr = d.d.slice(0,4);
+    if(yr===prevYear) return;
+    prevYear = yr;
+    const x = xs(i);
+    out += `<line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(dTop+phDD)}" stroke="var(--line)" stroke-width="1" opacity=".45"/>`;
+    out += `<text x="${px(x+3)}" y="${H-6}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${yr}</text>`;
+  });
   // 레버리지 축소 구간 음영
   let run=null;
   C.forEach((d,i)=>{
@@ -360,9 +382,9 @@ $('#caution').innerHTML = DATA.caution || '';
       run=null;
     }
   });
-  // 가로 그리드 + 축 라벨
+  // 가로 그리드 + 축 라벨 (로그축이므로 등간격이 아니라 등비간격으로 찍는다)
   for(let k=0;k<=3;k++){
-    const v = lo + (hi-lo)*k/3, y=yP(v);
+    const v = Math.exp(loL + (hiL-loL)*k/3), y=yP(v);
     out+=`<line x1="${L}" y1="${px(y)}" x2="${L+pw}" y2="${px(y)}" stroke="var(--line)" stroke-width="1"/>`;
     out+=`<text x="${L-8}" y="${px(y+3.5)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${Math.round(v).toLocaleString()}</text>`;
   }
@@ -371,18 +393,37 @@ $('#caution').innerHTML = DATA.caution || '';
   out+=`<path d="${path(d=>d.ndx,yP)}" fill="none" stroke="var(--ink)" stroke-width="1.9" stroke-linejoin="round"/>`;
   const lastX=xs(C.length-1), lastY=yP(C[C.length-1].ndx);
   out+=`<circle cx="${px(lastX)}" cy="${px(lastY)}" r="3.5" fill="var(--ink)"/>`;
+
+  // 신호 변경일 표기 — 세로선으로 전 패널을 관통시켜 위치를 짚고, 여유 있는 구간은 날짜까지 적는다.
+  // (몰려있는 구간은 라벨을 건너뛰지만 점과 세로선, 호버 시 정확한 날짜는 항상 남는다)
+  const dateIdx = new Map(C.map((d,i)=>[d.d,i]));
+  let lastLabelX = -Infinity;
+  const MIN_LABEL_GAP = 22;
+  (DATA.changes||[]).forEach(c=>{
+    const i = dateIdx.get(c.signal_date);
+    if(i===undefined) return;
+    const x = xs(i), tone = STATE_TONE[c.to] || 'var(--ink-3)';
+    out += `<g><line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(dTop+phDD)}" stroke="${tone}" stroke-width="1" stroke-dasharray="1.5 2" opacity=".55"/>`
+         + `<circle cx="${px(x)}" cy="${px(yP(C[i].ndx))}" r="2.6" fill="${tone}"/>`
+         + `<title>${dstr(c.signal_date)} · ${STATE_KO[c.from]} → ${STATE_KO[c.to]} (${c.to_alloc})</title></g>`;
+    if(x - lastLabelX >= MIN_LABEL_GAP){
+      const ly = T+phTop+6;
+      out += `<text x="${px(x+3)}" y="${px(ly)}" transform="rotate(90 ${px(x+3)} ${px(ly)})"
+        font-family="var(--mono)" font-size="8.5" fill="${tone}">${dstr(c.signal_date)}</text>`;
+      lastLabelX = x;
+    }
+  });
   // VIX 패널
   out+=`<line x1="${L}" y1="${px(yV(vLo))}" x2="${L+pw}" y2="${px(yV(vLo))}" stroke="var(--line)"/>`;
   [DATA.params.vix_down_threshold, DATA.params.vix_up_threshold].forEach(t=>{
     if(t<vLo||t>vHi) return;
     out+=`<line x1="${L}" y1="${px(yV(t))}" x2="${L+pw}" y2="${px(yV(t))}" stroke="var(--crit)" stroke-width="1" stroke-dasharray="3 3" opacity=".55"/>`;
-    out+=`<text x="${L+pw+6}" y="${px(yV(t)+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${t}</text>`;
+    out+=`<text x="${L-8}" y="${px(yV(t)+3.5)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${t}</text>`;
   });
   out+=`<path d="${path(d=>d.vix,yV)}" fill="none" stroke="var(--warn)" stroke-width="1.7"/>`;
   out+=`<text x="${L-8}" y="${px(yV(vHi)+9)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">VIX10</text>`;
 
-  // 낙폭 패널 (0% 기준선에서 아래로)
-  const dTop=T+phTop+gapY+phBot+gapY-6;
+  // 낙폭 패널 (0% 기준선에서 아래로) — dTop 은 위에서 이미 계산해 뒀다 (신호 세로선 높이에도 씀)
   const dLo=Math.min(-14, Math.min(...C.map(d=>d.dd))-2);
   const yD = v => dTop + (0-v)/(0-dLo)*phDD;
   out+=`<path d="${C.map((d,i)=>`${i?'L':'M'}${px(xs(i))} ${px(yD(d.dd))}`).join(' ')} L ${px(xs(C.length-1))} ${px(dTop)} L ${px(xs(0))} ${px(dTop)} Z" fill="var(--crit-soft)"/>`;
@@ -390,15 +431,10 @@ $('#caution').innerHTML = DATA.caution || '';
   out+=`<line x1="${L}" y1="${px(dTop)}" x2="${L+pw}" y2="${px(dTop)}" stroke="var(--line-strong)"/>`;
   const dthr=DATA.params.dd_threshold*100;
   out+=`<line x1="${L}" y1="${px(yD(dthr))}" x2="${L+pw}" y2="${px(yD(dthr))}" stroke="var(--crit)" stroke-width="1" stroke-dasharray="3 3"/>`;
-  out+=`<text x="${L+pw+6}" y="${px(yD(dthr)+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${dthr}%</text>`;
-  out+=`<text x="${L+pw+6}" y="${px(dTop+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">0%</text>`;
+  out+=`<text x="${L-8}" y="${px(yD(dthr)+3.5)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${dthr}%</text>`;
+  out+=`<text x="${L-8}" y="${px(dTop+3.5)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">0%</text>`;
   out+=`<text x="${L-8}" y="${px(dTop+11)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">낙폭</text>`;
 
-  // x축 라벨
-  [0, Math.floor(C.length/3), Math.floor(C.length*2/3), C.length-1].forEach(i=>{
-    out+=`<text x="${px(xs(i))}" y="${H-6}" text-anchor="${i===0?'start':(i===C.length-1?'end':'middle')}"
-      font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${C[i].d.slice(0,4)}.${C[i].d.slice(4,6)}</text>`;
-  });
   svg.innerHTML=out;
 })();
 </script>
