@@ -591,6 +591,7 @@ $('#caution').innerHTML = DATA.caution || '';
   }
 
   rebuild();
+  wrap.scrollLeft = 1e9; // 시작 화면은 가장 최근 구간부터 보여준다 (브라우저가 최댓값으로 알아서 잘라줌)
   renderDynamic();
   updateStickyX();
 
