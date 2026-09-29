@@ -35,7 +35,7 @@ def load_config(path=None, preset=None):
 
 
 def load_market(path=None):
-    """date(YYYYMMDD 오름차순), ndx, vix, irx"""
+    """date(YYYYMMDD 오름차순), ndx, vix, irx, tqqq(선택·표시용)"""
     path = path or os.path.join(ROOT, "data", "market.csv")
     out = []
     for r in csv.DictReader(open(path)):
@@ -44,6 +44,7 @@ def load_market(path=None):
             "ndx": float(r["ndx"]),
             "vix": float(r["vix"]) if r["vix"] else None,
             "irx": float(r["irx"]) if r["irx"] else None,
+            "tqqq": float(r["tqqq"]) if r.get("tqqq") else None,  # 차트 표시용
         })
     return out
 

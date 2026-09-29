@@ -185,7 +185,7 @@ GitHub은 **리포지토리에 60일간 활동이 없으면 스케줄 워크플�
 
 ```
 config.json              파라미터 — 여기만 바꾸면 됩니다
-data/market.csv          나스닥100·VIX 일간 종가 (1989-12 ~ )
+data/market.csv          나스닥100·VIX 일간 종가 (1989-12 ~ ), TQQQ 종가 (2010-02 ~, 차트 표시용)
 src/engine.py            지표 계산 · 시장상태 판정 · 목표배분
 src/fetch.py             시세 수집 (교차검증·이상치 거부·재검증)
 src/report.py            오늘의 상태를 JSON 으로

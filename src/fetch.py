@@ -14,6 +14,11 @@ GitHub Actions 러너에서 돌아간다는 전제가 설계를 지배한다.
   stooq 는 뺐다 — 러너에서 CSV 대신 HTML 을 돌려주는 것을 실측했다(2026-09).
   FRED 도 러너에서 읽기 타임아웃이 잦아 1회만 짧게 시도하는 보조로 내렸다.
 
+소스 (TQQQ — 차트 표시용, 신호 판정에는 쓰지 않는다)
+  Yahoo (q1/q2)  — 분할 반영 종가. 받지 못해도 워크플로는 멈추지 않고 비워 둔다.
+                   액면분할이 생기면 과거 값 전체를 같은 비율로 다시 맞춘다.
+  최초 1회 전체 이력(2010-02~) 채우기:  python3 src/fetch.py --backfill-tqqq
+
 소스 (VIX)
   CBOE 원본 미러(raw.githubusercontent) — 러너에서 사실상 항상 된다. 공식 종가라 권위가 있어
                                           과거 값이 어긋나면 이쪽으로 교정한다.
@@ -115,6 +120,41 @@ def fred(series="NASDAQ100", days=150):
            f"?id={series}&cosd={start}&coed={end}")
     t, to = BUDGET["fred"]
     return parse_fred(_get(url, tries=t, timeout=to), series)
+
+
+def yahoo_history(symbol, start="20100201", host="query1"):
+    """period1/period2 로 일봉 전체 이력을 받는다 (range=max 는 월봉으로 뭉개져 온다)."""
+    p1 = int(datetime.datetime.strptime(start, "%Y%m%d")
+             .replace(tzinfo=datetime.timezone.utc).timestamp())
+    p2 = int(time.time()) + 86400
+    url = (f"https://{host}.finance.yahoo.com/v8/finance/chart/"
+           f"{urllib.parse.quote(symbol)}?period1={p1}&period2={p2}&interval=1d")
+    return parse_yahoo(_get(url, tries=3, timeout=30), symbol)
+
+
+def merge_tqqq(rows, got, report):
+    """TQQQ 종가를 rows 에 반영. 분할(과거 값이 일정 비율로 통째로 바뀜)을 감지하면
+    받은 구간 이전의 저장값 전체를 같은 비율로 다시 맞춘다."""
+    have = [r for r in rows if r.get("tqqq") and r["date"] in got]
+    if have:
+        ref = have[0]  # 받은 구간 중 가장 오래된, 이미 저장돼 있던 날
+        ratio = got[ref["date"]] / float(ref["tqqq"])
+        if abs(ratio - 1) > 0.02:
+            n = 0
+            for r in rows:
+                if r["date"] < ref["date"] and r.get("tqqq"):
+                    r["tqqq"] = f"{float(r['tqqq']) * ratio:.6g}"
+                    n += 1
+            report["notes"].append(f"TQQQ 분할 감지(비율 {ratio:.4f}) — 과거 {n}개 값 재조정")
+    filled = 0
+    for r in rows:
+        v = got.get(r["date"])
+        if v is not None:
+            new = f"{v:.6g}"
+            if r.get("tqqq") != new:
+                r["tqqq"] = new
+                filled += 1
+    report["tqqq_updated"] = filled
 
 
 def parse_fred(text, series="?"):
@@ -237,10 +277,17 @@ def main():
         ("yahoo-q2",    lambda: yahoo("^VIX", host="query2")),
     ])
 
+    tq_ok, tq_bad = gather([
+        ("yahoo-q1", (lambda: yahoo_history("TQQQ", host="query1")) if "--backfill-tqqq" in sys.argv
+                     else (lambda: yahoo("TQQQ", host="query1"))),
+        ("yahoo-q2", lambda: yahoo("TQQQ", host="query2")),
+    ])
+
     report = {"stored_last": last["date"],
               "ndx_sources_ok": [n for n, _ in ndx_ok],
               "vix_sources_ok": [n for n, _ in vix_ok],
-              "sources_failed": ndx_bad + vix_bad,
+              "tqqq_sources_ok": [n for n, _ in tq_ok],
+              "sources_failed": ndx_bad + vix_bad + [dict(b, source="tqqq/" + b["source"]) for b in tq_bad],
               "appended": [], "notes": []}
 
     if not ndx_ok:
@@ -275,7 +322,7 @@ def main():
             raise FetchError(f"{d} VIX {vix} 범위 이탈")
 
         rows.append({"date": d, "ndx": f"{ndx:g}",
-                     "vix": f"{vix:g}" if vix is not None else "", "irx": ""})
+                     "vix": f"{vix:g}" if vix is not None else "", "irx": "", "tqqq": ""})
         report["appended"].append({"date": d, "ndx": ndx, "vix": vix,
                                    "sources": [n for n, _ in ndx_vals]})
         prev_close = ndx
@@ -308,6 +355,16 @@ def main():
     report["vix_filled"] = filled
     report["vix_corrected"] = corrected
 
+    # TQQQ — 표시용이라 실패해도 진행. 첫 소스(가장 긴 이력) 우선, 나머지로 빈 날을 메운다.
+    if tq_ok:
+        got = {}
+        for _, s in reversed(tq_ok):
+            got.update(s)
+        got.update(tq_ok[0][1])
+        merge_tqqq(rows, got, report)
+    else:
+        report["notes"].append("TQQQ 소스 없음 — 이번에는 비워 두고 진행합니다(신호 판정과 무관).")
+
     # ── 최근 값 재검증 ────────────────────────────────────────
     # FRED 는 미 동부 밤늦게 갱신돼 이른 실행에서는 하루 뒤처져 있다.
     # 그래서 다음 실행 때 최근 며칠치를 독립 소스와 다시 대조한다.
@@ -332,9 +389,10 @@ def main():
     if not dry:
         tmp = MARKET + ".tmp"
         with open(tmp, "w") as f:
-            f.write("date,ndx,vix,irx\n")
+            f.write("date,ndx,vix,irx,tqqq\n")
             for r in rows:
-                f.write(f"{r['date']},{r['ndx']},{r.get('vix','')},{r.get('irx','')}\n")
+                f.write(f"{r['date']},{r['ndx']},{r.get('vix','')},{r.get('irx','')},"
+                        f"{r.get('tqqq') or ''}\n")
         os.replace(tmp, MARKET)
     report["new_last"] = rows[-1]["date"]
     report["rows"] = len(rows)

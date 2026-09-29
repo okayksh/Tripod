@@ -41,7 +41,7 @@ def build_payload(preset=None):
 
     chart = [{"d": r["date"], "ndx": round(r["ndx"], 2), "sma": round(r["sma"], 2),
               "vix": round(r["vix_ma"], 2), "dd": round(r["dd"] * 100, 2),
-              "st": r["state"]}
+              "st": r["state"], "tq": r.get("tqqq")}
              for r in live]
 
     dist = distance_report(cur, p)
