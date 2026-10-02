@@ -48,11 +48,39 @@ def load_market(path=None):
         })
     return out
 
+def compute_rsi(closes, period=14):
+    """표준 RSI (Wilder 방식 스무딩). 앞쪽 period개는 None."""
+    n = len(closes)
+    rsi = [None] * n
+    if n <= period:
+        return rsi
+    gains = [0.0] * n
+    losses = [0.0] * n
+    for i in range(1, n):
+        diff = closes[i] - closes[i - 1]
+        gains[i] = max(diff, 0.0)
+        losses[i] = max(-diff, 0.0)
+    avg_gain = sum(gains[1:period + 1]) / period
+    avg_loss = sum(losses[1:period + 1]) / period
+
+    def _rsi(ag, al):
+        if al == 0:
+            return 100.0
+        return 100 - 100 / (1 + ag / al)
+
+    rsi[period] = _rsi(avg_gain, avg_loss)
+    for i in range(period + 1, n):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        rsi[i] = _rsi(avg_gain, avg_loss)
+    return rsi
+
 
 def compute_indicators(rows, p):
     """각 행에 sma / vix_ma / high52 / dd 를 채워 넣는다."""
     n_sma, n_vix, n_dd = p["sma_window"], p["vix_window"], p["dd_window"]
     ndx = [r["ndx"] for r in rows]
+    rsi_vals = compute_rsi(ndx, 14)
     vix = [r["vix"] for r in rows]
     for i, r in enumerate(rows):
         r["sma"] = sum(ndx[i - n_sma + 1:i + 1]) / n_sma if i >= n_sma - 1 else None
@@ -66,6 +94,7 @@ def compute_indicators(rows, p):
             r["high52"] = None
             r["dd"] = None
         r["gap"] = (r["ndx"] / r["sma"] - 1.0) if r["sma"] else None
+        r["rsi"] = rsi_vals[i]      
     return rows
 
 
