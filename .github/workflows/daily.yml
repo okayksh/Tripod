@@ -139,3 +139,29 @@ jobs:
               body,
               labels: ['signal-change'],
             });
+
+      - name: 텔레그램 알림 (신호 변경 시)
+        if: steps.before.outputs.state != 'NONE' && steps.before.outputs.state != steps.build.outputs.state
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.parse
+
+          s = json.load(open("docs/state.json"))
+          msg = (
+              f"\u2605 {s['asof']} \uc2e0\ud638 \ubcc0\uacbd\n"
+              f"{s['prev_alloc_text']} \u2192 {s['alloc_text']}  ({s['gear']:.1f}\ubc30)\n\n"
+              f"250\uc77c\uc120 \uc774\uaca9: {s['gap_pct']:+.2f}%\n"
+              f"VIX10 \ud3c9\uade0: {s['vix_ma']:.2f}\n"
+              f"52\uc8fc \ub099\ud3ed: {s['dd_pct']:+.2f}%\n\n"
+              f"\uccb4\uacb0\uc740 \ub2e4\uc74c \uac70\ub798\uc77c \uc885\uac00 \uae30\uc900\uc785\ub2c8\ub2e4."
+          )
+
+          token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+          url = f"https://api.telegram.org/bot{token}/sendMessage"
+          data = urllib.parse.urlencode({"chat_id": chat_id, "text": msg}).encode()
+          urllib.request.urlopen(url, data=data, timeout=10)
+          PY
