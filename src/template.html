@@ -9,6 +9,7 @@
   --line:#d2dbd9; --line-strong:#b3c1be;
   --accent:#0d6a60; --accent-soft:#d9ebe7;
   --tq:#7b4fc9;
+  --rsi:#2b6cb8;
   --ok:#1c6f4a; --ok-soft:#dcece2;
   --warn:#9a6414; --warn-soft:#f3e7d2;
   --crit:#9c2f2f; --crit-soft:#f2dcdc;
@@ -23,6 +24,7 @@
     --line:#263437; --line-strong:#3a4b4f;
     --accent:#5fc9b8; --accent-soft:#12312e;
     --tq:#b89af0;
+    --rsi:#6fa8e0;
     --ok:#57bd8c; --ok-soft:#122b21;
     --warn:#d8a556; --warn-soft:#302617;
     --crit:#e08585; --crit-soft:#331c1c;
@@ -35,6 +37,7 @@
   --line:#263437; --line-strong:#3a4b4f;
   --accent:#5fc9b8; --accent-soft:#12312e;
     --tq:#b89af0;
+  --rsi:#6fa8e0;
   --ok:#57bd8c; --ok-soft:#122b21;
   --warn:#d8a556; --warn-soft:#302617;
   --crit:#e08585; --crit-soft:#331c1c;
@@ -193,6 +196,7 @@ footer b{color:var(--ink-2);font-weight:500}
       <label class="tqtoggle"><input type="checkbox" id="tq-toggle" checked><i style="background:var(--tq)"></i>TQQQ (오른쪽 눈금)</label>
       <span><i style="background:var(--warn)"></i>VIX 10일 평균</span>
       <span><i style="background:var(--crit)"></i>52주 고점 대비 낙폭</span>
+      <span><i style="background:var(--rsi)"></i>RSI(14)</span>
       <span><i style="background:var(--ink-3)"></i>점선 = 신호 변경일 (마우스를 올리면 날짜 표시)</span>
     </div>
   </section>
@@ -359,12 +363,14 @@ $('#caution').innerHTML = DATA.caution || '';
   const L=54, R=48, T=14, phTop=222, gapTop=64, gapMid=28, botMargin=24;
   let phBot = clamp(loadPref('phBot', 72), MIN_PANEL_H, MAX_PANEL_H);
   let phDD  = clamp(loadPref('phDD', 64), MIN_PANEL_H, MAX_PANEL_H);
+  let phRSI = clamp(loadPref('phRSI', 64), MIN_PANEL_H, MAX_PANEL_H);
   let showTq = loadPref('showTq', 1) !== 0 && C.some(d=>d.tq);
-  let H, dTop;
+  let H, dTop, rsiTop;
 
   function computeLayout(){
-    H = T+phTop+gapTop+phBot+gapMid+phDD+botMargin;
     dTop = T+phTop+gapTop+phBot+gapMid-6;
+    rsiTop = dTop+phDD+gapMid-6;
+    H = rsiTop+phRSI+botMargin;
   }
 
   // 마우스 휠로 좌우 확대·축소 — 값은 "거래일당 몇 픽셀". 시프트+휠/트랙패드 좌우 스와이프는 그대로 패닝.
@@ -399,8 +405,9 @@ $('#caution').innerHTML = DATA.caution || '';
       `<rect class="resize-handle" data-handle="${id}" x="0" y="${px(y-5)}" width="${px(hw)}" height="10" fill="transparent" pointer-events="all" style="cursor:row-resize"/>`
     + `<line x1="0" y1="${px(y)}" x2="${px(hw)}" y2="${px(y)}" stroke="var(--line-strong)" stroke-width="1" stroke-dasharray="2 2" opacity=".6" pointer-events="none"/>`;
     const h1 = T+phTop+gapTop+phBot; // VIX 패널 바닥 경계
-    const h2 = dTop+phDD;            // 낙폭 패널 바닥 경계(차트 전체 바닥)
-    return `<g id="resizeHandles">${row(h1,'vix')}${row(h2,'dd')}</g>`;
+    const h2 = dTop+phDD;            // 낙폭 패널 바닥 경계
+    const h3 = rsiTop+phRSI;         // RSI 패널 바닥 경계(차트 전체 바닥)
+    return `<g id="resizeHandles">${row(h1,'vix')}${row(h2,'dd')}${row(h3,'rsi')}</g>`;
   }
 
   function buildStatic(){
@@ -412,7 +419,7 @@ $('#caution').innerHTML = DATA.caution || '';
       if(yr===prevYear) return;
       prevYear = yr;
       const x = xs(i);
-      out += `<line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(dTop+phDD)}" stroke="var(--line)" stroke-width="1" opacity=".45"/>`;
+      out += `<line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(rsiTop+phRSI)}" stroke="var(--line)" stroke-width="1" opacity=".45"/>`;
       out += `<text x="${px(x+3)}" y="${H-6}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${yr}</text>`;
     });
     // 레버리지 축소 구간 음영
@@ -439,8 +446,8 @@ $('#caution').innerHTML = DATA.caution || '';
       if(i===undefined) return;
       const x = xs(i), tone = STATE_TONE[c.to] || 'var(--ink-3)';
       out += `<g>`
-           + `<rect x="${px(x-4)}" y="${px(T)}" width="8" height="${px(dTop+phDD-T)}" fill="transparent" pointer-events="all"/>`
-           + `<line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(dTop+phDD)}" stroke="${tone}" stroke-width="1" stroke-dasharray="1.5 2" opacity=".55"/>`
+           + `<rect x="${px(x-4)}" y="${px(T)}" width="8" height="${px(rsiTop+phRSI-T)}" fill="transparent" pointer-events="all"/>`
+           + `<line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(rsiTop+phRSI)}" stroke="${tone}" stroke-width="1" stroke-dasharray="1.5 2" opacity=".55"/>`
            + `<title>${dstr(c.signal_date)} · ${STATE_KO[c.from]} → ${STATE_KO[c.to]} (${c.to_alloc})</title></g>`;
       if(x - lastLabelX >= MIN_LABEL_GAP){
         const ly = T+phTop+6;
@@ -453,11 +460,13 @@ $('#caution').innerHTML = DATA.caution || '';
     // VIX·낙폭 패널도 가격 패널처럼 "지금 보이는 구간"의 고저에 맞춰 y축을 다시 잡는다
     out += `<g id="vixDynamic"></g>`;
     out += `<g id="ddDynamic"></g>`;
+    out += `<g id="rsiDynamic"></g>`;
 
     // 왼쪽 고정 라벨(패널 제목만 — 값 라벨은 축 자체가 움직이므로 동적 렌더에서 그린다)
     let fixed = '';
     fixed += fixedLabel(T+phTop+gapTop-10, 'VIX10');
     fixed += fixedLabel(dTop-10, '낙폭');
+    fixed += fixedLabel(rsiTop-10, 'RSI');
 
     out += `<g id="fixedLabels">${fixed}</g>`;
     out += buildResizeHandles();
@@ -530,7 +539,7 @@ $('#caution').innerHTML = DATA.caution || '';
   // VIX·낙폭도 같은 방식: 보이는 구간에 실제로 찍힌 값만 놓고 고저를 다시 잡는다.
   // 문턱선(28/18, -9%)은 그 구간의 실제 값 범위에는 반영하지 않고, 계산된 범위 안에 들어올 때만 그려준다 —
   // 문턱을 억지로 범위에 끼워 넣으면 조용한 구간에서도 축이 넓게 고정돼 버려 다시 "거의 직선"이 된다.
-  let vixDynamic, ddDynamic;
+  let vixDynamic, ddDynamic, rsiDynamic;
   function renderVixDynamic(){
     const [i0,i1] = visibleIdxRange();
     const slice = C.slice(i0, i1+1);
@@ -600,10 +609,38 @@ $('#caution').innerHTML = DATA.caution || '';
     }
     ddDynamic.innerHTML = g;
   }
+  // RSI는 0~100으로 범위가 고정돼 있으니, 가격·VIX·낙폭처럼 보이는 구간마다 축을 다시 잡지 않고
+  // 30/50/70 기준선을 늘 같은 자리에 둔다 — 그래야 과매수·과매도 구간을 한눈에 비교할 수 있다.
+  function renderRsiDynamic(){
+    const [i0,i1] = visibleIdxRange();
+    const slice = C.slice(i0, i1+1);
+    const yR = v => rsiTop + phRSI - (v/100)*phRSI;
+    let dpath='', prevK=-2;
+    slice.forEach((d,k)=>{
+      if(d.rsi==null) return;
+      dpath += `${k===prevK+1?'L':'M'}${px(xs(i0+k))} ${px(yR(d.rsi))}`;
+      prevK = k;
+    });
+    let g='';
+    const lx = wrap.scrollLeft + 4;
+    [30,50,70].forEach(t=>{
+      const y = yR(t);
+      const col = (t===30||t===70) ? 'var(--crit)' : 'var(--line)';
+      g += `<line x1="${px(L)}" y1="${px(y)}" x2="${px(L+pw)}" y2="${px(y)}" stroke="${col}" stroke-width="1" stroke-dasharray="3 3" opacity=".55"/>`;
+      g += `<rect x="${px(lx-4)}" y="${px(y-7)}" width="30" height="14" fill="var(--panel)" opacity=".82"/>`;
+      g += `<text x="${px(lx)}" y="${px(y+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${t}</text>`;
+    });
+    g += `<path d="${dpath}" fill="none" stroke="var(--rsi)" stroke-width="1.5"/>`;
+    if(i1===C.length-1 && C[C.length-1].rsi!=null){
+      g += `<circle cx="${px(xs(C.length-1))}" cy="${px(yR(C[C.length-1].rsi))}" r="3" fill="var(--rsi)"/>`;
+    }
+    rsiDynamic.innerHTML = g;
+  }
   function renderDynamic(){
     renderPriceDynamic();
     renderVixDynamic();
     renderDdDynamic();
+    renderRsiDynamic();
   }
 
   function rebuild(){
@@ -616,6 +653,7 @@ $('#caution').innerHTML = DATA.caution || '';
     pxDynamic = $('#pxDynamic');
     vixDynamic = $('#vixDynamic');
     ddDynamic = $('#ddDynamic');
+    rsiDynamic = $('#rsiDynamic');
   }
 
   rebuild();
@@ -663,7 +701,7 @@ $('#caution').innerHTML = DATA.caution || '';
   svg.addEventListener('mousedown', (e)=>{
     const t = e.target.closest('.resize-handle');
     if(!t) return;
-    resizeDrag = { which: t.dataset.handle, startY: e.clientY, curY: e.clientY, startVix: phBot, startDD: phDD };
+    resizeDrag = { which: t.dataset.handle, startY: e.clientY, curY: e.clientY, startVix: phBot, startDD: phDD, startRSI: phRSI };
     document.body.style.cursor = 'row-resize';
     e.preventDefault();
   });
@@ -676,7 +714,8 @@ $('#caution').innerHTML = DATA.caution || '';
       if(!resizeDrag){ resizePending=false; return; }
       const dy = resizeDrag.curY - resizeDrag.startY;
       if(resizeDrag.which==='vix') phBot = clamp(resizeDrag.startVix+dy, MIN_PANEL_H, MAX_PANEL_H);
-      else phDD = clamp(resizeDrag.startDD+dy, MIN_PANEL_H, MAX_PANEL_H);
+      else if(resizeDrag.which==='dd') phDD = clamp(resizeDrag.startDD+dy, MIN_PANEL_H, MAX_PANEL_H);
+      else phRSI = clamp(resizeDrag.startRSI+dy, MIN_PANEL_H, MAX_PANEL_H);
       rebuild();
       renderDynamic();
       updateStickyX();
@@ -687,6 +726,7 @@ $('#caution').innerHTML = DATA.caution || '';
     if(!resizeDrag) return;
     savePref('phBot', phBot);
     savePref('phDD', phDD);
+    savePref('phRSI', phRSI);
     resizeDrag = null;
     document.body.style.cursor = '';
   });
