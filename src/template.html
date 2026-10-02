@@ -387,8 +387,8 @@ $('#caution').innerHTML = DATA.caution || '';
   }
 
   // 마우스 휠로 좌우 확대·축소 — 값은 "거래일당 몇 픽셀". 시프트+휠/트랙패드 좌우 스와이프는 그대로 패닝.
-  const ZOOM_LEVELS = [0.6, 1, 1.6, 2, 3, 5, 8, 13, 20, 32];
-  let zoomIdx = 4; // 3px/거래일 — 기존 기본 밀도
+  const ZOOM_LEVELS = [0.04, 0.08, 0.15, 0.25, 0.4, 0.6, 1, 1.6, 2, 3, 5, 8, 13, 20, 32];
+  let zoomIdx = 9; // 3px/거래일 — 기존 기본 밀도
   let pw, W, xs;
   function computeGeom(){
     const pxPerDay = ZOOM_LEVELS[zoomIdx];
@@ -785,8 +785,8 @@ $('#caution').innerHTML = DATA.caution || '';
   const L=58, R=58, T=14, B=24;
   const H = 300, ph = H-T-B;
 
-  const ZOOM_LEVELS = [0.6, 1, 1.6, 2, 3, 5, 8, 13, 20, 32];
-  let zoomIdx = 4;
+  const ZOOM_LEVELS = [0.04, 0.08, 0.15, 0.25, 0.4, 0.6, 1, 1.6, 2, 3, 5, 8, 13, 20, 32];
+  let zoomIdx = 9;
   let pw, W, xs;
   function computeGeom(){
     const pxPerDay = ZOOM_LEVELS[zoomIdx];
