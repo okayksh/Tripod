@@ -203,6 +203,19 @@ footer b{color:var(--ink-2);font-weight:500}
 
   <section class="card">
     <div class="hd">
+      <h2>35년 전체 &mdash; 선형 눈금 비교 (지수 · TQQQ)</h2>
+      <span class="eyebrow">위 차트는 로그 눈금, 이건 일반(선형) 눈금 &mdash; 똑같이 좌우 스크롤/드래그, 휠로 확대·축소됩니다. 보이는 구간 고저에 맞춰 축이 자동으로 다시 잡힙니다</span>
+    </div>
+    <div class="chartwrap"><svg id="chartLinear" viewBox="0 0 1000 300" role="img"
+      aria-label="1991년부터 현재까지 나스닥100 지수와 TQQQ 종가를 선형 눈금으로 비교한 그래프, 좌우 스크롤·드래그·휠로 확대 가능"></svg></div>
+    <div class="legend">
+      <span><i style="background:var(--ink)"></i>NDX (왼쪽 눈금, 선형)</span>
+      <span><i style="background:var(--tq)"></i>TQQQ (오른쪽 눈금, 선형)</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="hd">
       <h2>신호 변경 이력</h2>
       <span class="eyebrow" id="hist-count"></span>
     </div>
@@ -757,6 +770,193 @@ $('#caution').innerHTML = DATA.caution || '';
       wrap.scrollLeft = Math.max(0, newX - cursorOffset);
       renderDynamic();
       updateStickyX();
+      pendingZoom=false;
+    });
+  }, {passive:false});
+})();
+
+/* ── 선형(linear) 비교 차트 — 위 로그 차트와 같은 스크롤/줌/드래그, 눈금만 선형 ── */
+(function(){
+  const C = DATA.chart, svg = $('#chartLinear'), wrap = svg.closest('.chartwrap');
+  if(!svg || !C.length) return;
+  const px = v => v.toFixed(1);
+  const dateIdx = new Map(C.map((d,i)=>[d.d,i]));
+
+  const L=58, R=58, T=14, B=24;
+  const H = 300, ph = H-T-B;
+
+  const ZOOM_LEVELS = [0.6, 1, 1.6, 2, 3, 5, 8, 13, 20, 32];
+  let zoomIdx = 4;
+  let pw, W, xs;
+  function computeGeom(){
+    const pxPerDay = ZOOM_LEVELS[zoomIdx];
+    pw = Math.max((wrap.clientWidth||700)-L-R, (C.length-1)*pxPerDay);
+    W = L+R+pw;
+    xs = i => L + pw*i/(C.length-1);
+  }
+
+  function visibleIdxRange(){
+    const x0 = wrap.scrollLeft - 40, x1 = wrap.scrollLeft + wrap.clientWidth + 40;
+    const i0 = Math.max(0, Math.floor((x0-L)*(C.length-1)/pw));
+    const i1 = Math.min(C.length-1, Math.ceil((x1-L)*(C.length-1)/pw));
+    return i1>i0 ? [i0,i1] : [0, C.length-1];
+  }
+
+  function buildStatic(){
+    let out = '';
+    let prevYear = null;
+    C.forEach((d,i)=>{
+      const yr = d.d.slice(0,4);
+      if(yr===prevYear) return;
+      prevYear = yr;
+      const x = xs(i);
+      out += `<line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(T+ph)}" stroke="var(--line)" stroke-width="1" opacity=".45"/>`;
+      out += `<text x="${px(x+3)}" y="${H-6}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${yr}</text>`;
+    });
+    (DATA.changes||[]).forEach(c=>{
+      const i = dateIdx.get(c.signal_date);
+      if(i===undefined) return;
+      const x = xs(i), tone = STATE_TONE[c.to] || 'var(--ink-3)';
+      out += `<g><rect x="${px(x-4)}" y="${px(T)}" width="8" height="${px(ph)}" fill="transparent" pointer-events="all"/>`
+           + `<line x1="${px(x)}" y1="${px(T)}" x2="${px(x)}" y2="${px(T+ph)}" stroke="${tone}" stroke-width="1" stroke-dasharray="1.5 2" opacity=".55"/>`
+           + `<title>${dstr(c.signal_date)} · ${STATE_KO[c.from]} → ${STATE_KO[c.to]} (${c.to_alloc})</title></g>`;
+    });
+    out += `<g id="linDynamic"></g>`;
+    return out;
+  }
+
+  let linDynamic;
+  function renderDynamic(){
+    const [i0,i1] = visibleIdxRange();
+    const slice = C.slice(i0, i1+1);
+
+    const nVals = slice.map(d=>d.ndx);
+    let nlo = Math.min(...nVals), nhi = Math.max(...nVals);
+    let npad = (nhi-nlo)*0.1 || nhi*0.1 || 1; nlo = Math.max(0, nlo-npad); nhi += npad;
+    const yN = v => T+ph-(v-nlo)/(nhi-nlo)*ph;
+
+    const tqSlice = slice.filter(d=>d.tq!=null);
+    const hasTq = tqSlice.length>0;
+    let tlo=0, thi=1;
+    if(hasTq){
+      const tVals = tqSlice.map(d=>d.tq);
+      tlo = Math.min(...tVals); thi = Math.max(...tVals);
+      const tpad = (thi-tlo)*0.1 || thi*0.1 || 1; tlo = Math.max(0, tlo-tpad); thi += tpad;
+    }
+    const yT = v => T+ph-(v-tlo)/(thi-tlo)*ph;
+
+    let g = '';
+    const lx = wrap.scrollLeft + 4;
+    const rx = Math.min(wrap.scrollLeft + wrap.clientWidth, W) - 4;
+    for(let k=0;k<=4;k++){
+      const v = nlo+(nhi-nlo)*k/4, y = yN(v);
+      g += `<line x1="${px(L)}" y1="${px(y)}" x2="${px(L+pw)}" y2="${px(y)}" stroke="var(--line)" stroke-width="1"/>`;
+      g += `<rect x="${px(lx-4)}" y="${px(y-7)}" width="54" height="14" fill="var(--panel)" opacity=".82"/>`;
+      g += `<text x="${px(lx)}" y="${px(y+3.5)}" font-family="var(--mono)" font-size="10" fill="var(--ink-3)">${Math.round(v).toLocaleString()}</text>`;
+    }
+    if(hasTq){
+      for(let k=0;k<=4;k++){
+        const v = tlo+(thi-tlo)*k/4, y = yT(v);
+        g += `<rect x="${px(rx-50)}" y="${px(y-7)}" width="54" height="14" fill="var(--panel)" opacity=".82"/>`;
+        g += `<text x="${px(rx)}" y="${px(y+3.5)}" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--tq)">$${v.toFixed(0)}</text>`;
+      }
+    }
+
+    const ndxPath = slice.map((d,k)=>`${k?'L':'M'}${px(xs(i0+k))} ${px(yN(d.ndx))}`).join(' ');
+    g += `<path d="${ndxPath}" fill="none" stroke="var(--ink)" stroke-width="1.7" stroke-linejoin="round"/>`;
+    if(i1===C.length-1){
+      g += `<circle cx="${px(xs(C.length-1))}" cy="${px(yN(C[C.length-1].ndx))}" r="3.2" fill="var(--ink)"/>`;
+    }
+
+    if(hasTq){
+      let tqPath = '', prevK = -2;
+      slice.forEach((d,k)=>{
+        if(d.tq==null) return;
+        tqPath += `${k===prevK+1?'L':'M'}${px(xs(i0+k))} ${px(yT(d.tq))}`;
+        prevK = k;
+      });
+      g += `<path d="${tqPath}" fill="none" stroke="var(--tq)" stroke-width="1.5"/>`;
+      if(i1===C.length-1 && C[C.length-1].tq!=null){
+        g += `<circle cx="${px(xs(C.length-1))}" cy="${px(yT(C[C.length-1].tq))}" r="3" fill="var(--tq)"/>`;
+      }
+    }
+
+    (DATA.changes||[]).forEach(c=>{
+      const i = dateIdx.get(c.signal_date);
+      if(i===undefined || i<i0 || i>i1) return;
+      const tone = STATE_TONE[c.to] || 'var(--ink-3)';
+      g += `<circle cx="${px(xs(i))}" cy="${px(yN(C[i].ndx))}" r="4" fill="${tone}" pointer-events="all">`
+         + `<title>${dstr(c.signal_date)} · ${STATE_KO[c.from]} → ${STATE_KO[c.to]} (${c.to_alloc})</title></circle>`;
+    });
+
+    linDynamic.innerHTML = g;
+  }
+
+  function rebuild(){
+    computeGeom();
+    svg.setAttribute('viewBox', `0 0 ${px(W)} ${px(H)}`);
+    svg.style.width = `${px(W)}px`;
+    svg.style.height = 'auto';
+    svg.innerHTML = buildStatic();
+    linDynamic = $('#linDynamic');
+  }
+
+  rebuild();
+  wrap.scrollLeft = 1e9;
+  renderDynamic();
+
+  let ticking = false;
+  wrap.addEventListener('scroll', ()=>{
+    if(ticking) return;
+    ticking = true;
+    requestAnimationFrame(()=>{ renderDynamic(); ticking=false; });
+  }, {passive:true});
+  window.addEventListener('resize', ()=>{ rebuild(); wrap.scrollLeft = Math.min(wrap.scrollLeft, W); renderDynamic(); });
+
+  // 드래그로 좌우 이동
+  let dragging=false, dragX=0, dragScroll=0;
+  wrap.addEventListener('mousedown', (e)=>{
+    if(e.button !== 0) return;
+    dragging = true;
+    dragX = e.clientX; dragScroll = wrap.scrollLeft;
+    wrap.classList.add('dragging');
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e)=>{
+    if(!dragging) return;
+    wrap.scrollLeft = dragScroll - (e.clientX - dragX);
+  });
+  window.addEventListener('mouseup', ()=>{
+    if(!dragging) return;
+    dragging = false;
+    wrap.classList.remove('dragging');
+  });
+
+  // 휠로 확대·축소 (커서 아래 지점을 고정한 채 줌)
+  let wheelAccum=0, pendingZoom=false;
+  wrap.addEventListener('wheel', (e)=>{
+    if(e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    wheelAccum += e.deltaY;
+    const STEP=70;
+    let changed=false;
+    while(Math.abs(wheelAccum) >= STEP){
+      const dir = wheelAccum>0 ? -1 : 1;
+      const next = Math.max(0, Math.min(ZOOM_LEVELS.length-1, zoomIdx+dir));
+      if(next!==zoomIdx){ zoomIdx=next; changed=true; }
+      wheelAccum += wheelAccum>0 ? -STEP : STEP;
+    }
+    if(!changed || pendingZoom) return;
+    pendingZoom=true;
+    const rect = wrap.getBoundingClientRect();
+    const cursorOffset = e.clientX - rect.left;
+    const cursorSvgX = wrap.scrollLeft + cursorOffset;
+    const idxUnderCursor = Math.max(0, Math.min(C.length-1, (cursorSvgX-L)*(C.length-1)/pw));
+    requestAnimationFrame(()=>{
+      rebuild();
+      const newX = xs(idxUnderCursor);
+      wrap.scrollLeft = Math.max(0, newX - cursorOffset);
+      renderDynamic();
       pendingZoom=false;
     });
   }, {passive:false});
