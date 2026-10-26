@@ -9,6 +9,12 @@ on:
     # 05:30 UTC = 한국시간 오후 14:30 — FRED 갱신 이후. 여기서 확실히 채우고 교차검증까지 끝낸다.
     #   규칙상 체결이 T+1(다음 미국장 마감)이므로 이 시점이면 주문 전에 충분히 여유가 있다.
     - cron: "30 5 * * 2-6"
+    # 아래 두 번은 보강용이다. GitHub 예약 실행은 부하가 몰리면 지연되거나 건너뛰는 일이 있어서,
+    # 한 번 놓쳐도 몇 시간 안에 다음 실행이 따라잡도록 어긋난 분(分)에 하나씩 더 둔다.
+    # 새 데이터가 없으면 아무것도 안 하고 끝나므로 여러 번 돌아도 안전하다.
+    #   01:47 UTC = 한국시간 10:47 / 09:17 UTC = 한국시간 18:17
+    - cron: "47 1 * * 2-6"
+    - cron: "17 9 * * 2-6"
   workflow_dispatch:        # 수동 실행. 리포지토리 '활동'으로 잡혀서 60일 자동중지도 막아준다.
   push:
     paths:
@@ -19,6 +25,7 @@ on:
 permissions:
   contents: write
   issues: write
+  actions: write            # 아래 '자동중지 방지' 단계에서 워크플로 활성화 API를 부르기 위함
 
 concurrency:
   group: tripod-daily
@@ -31,6 +38,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # GitHub 은 저장소에 사람의 활동이 60일 없으면 예약 실행을 끈다(봇 커밋은 활동으로 안 친다).
+      # 워크플로 '활성화' API 를 매번 불러 그 타이머를 리셋한다. 실패해도 본 작업엔 영향 없다.
+      - name: 자동중지 방지 (keepalive)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/daily.yml/enable"
 
       - uses: actions/setup-python@v5
         with:
