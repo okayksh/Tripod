@@ -28,6 +28,9 @@ GitHub Actions 러너에서 돌아간다는 전제가 설계를 지배한다.
   · NDX 소스가 하나도 안 열리면  → 죽는다(워크플로 실패 → 메일).
   · 소스는 열렸는데 새 거래일이 없으면 → 정상 종료. 휴장일이거나 아직 발표 전이다.
   · 소스끼리 0.5% 넘게 어긋나면 → 죽는다. 조용히 틀린 값을 남기느니 실패하는 게 낫다.
+  · 미국 장중(동부시간 16:30 이전)의 '오늘' 시세는 아직 종가가 아니라 임시값이다 → 받지 않는다.
+  · 이미 저장된 최근 값이 임시값이었다면, 서로 다른 제공처 2곳 이상이 일치하는 값으로 바로잡는다.
+    (제공처가 안 맞거나 1곳뿐이면 건드리지 않고 기존처럼 죽는다.)
 
 사용법:  python3 src/fetch.py            # data/market.csv 갱신
          python3 src/fetch.py --dry-run  # 저장하지 않고 무엇을 받았는지만 출력
@@ -245,6 +248,50 @@ def gather(sources):
     return ok, bad
 
 
+def provisional_date(now_utc=None):
+    """미국 장이 아직 안 끝났다면(동부시간 16:30 이전) 그 '오늘' 날짜(YYYYMMDD)를, 아니면 None.
+    그 날짜의 값은 종가가 아니라 장중 시세라서 저장하면 안 된다.
+    시간대 정보를 못 읽으면 서머타임을 모르는 셈 치고 5시간으로 계산한다 — 마감을 더 늦게 보는 안전한 쪽이다."""
+    now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        now_et = now_utc.astimezone(ZoneInfo("America/New_York"))
+    except Exception:
+        now_et = now_utc - datetime.timedelta(hours=5)
+    if now_et.weekday() >= 5:
+        return None
+    if now_et.hour * 60 + now_et.minute < 16 * 60 + 30:
+        return now_et.strftime("%Y%m%d")
+    return None
+
+
+def heal_recent(rows, ndx_ok, n=6, agree_tol=0.001, differ_tol=2e-5):
+    """저장된 최근 n일 지수가 장중 임시값이었다면 확정 종가로 교체한다.
+    서로 '다른 제공처'(fred / nasdaq / yahoo) 2곳 이상이 agree_tol 안에서 일치하고,
+    그 값이 저장값과 differ_tol 보다 크게 다를 때만 고친다. (yahoo q1/q2 는 같은 제공처로 센다.)
+    소스끼리 안 맞거나 한 곳뿐이면 건드리지 않는다 → 뒤의 재검증이 기존처럼 실패시킨다."""
+    healed = []
+    for r in rows[-n:]:
+        vals = [(name, s[r["date"]]) for name, s in ndx_ok if r["date"] in s]
+        if len(vals) < 2:
+            continue
+        stored = float(r["ndx"])
+        best = None
+        for _, anchor in vals:
+            group = [(nm, v) for nm, v in vals if abs(v / anchor - 1) <= agree_tol]
+            if len({nm.split("-")[0] for nm, _ in group}) >= 2:
+                best = group
+                break
+        if best is None:
+            continue
+        new = best[0][1]          # ndx_ok 순서(fred → nasdaq → yahoo) 중 먼저 나온 값
+        if abs(new / stored - 1) > differ_tol:
+            healed.append({"date": r["date"], "old": stored, "new": new,
+                           "sources": [nm for nm, _ in best]})
+            r["ndx"] = f"{new:g}"
+    return healed
+
+
 def agree(series, date, label):
     """여러 소스의 같은 날짜 값을 대조하고 대표값을 돌려준다."""
     vals = [(n, s[date]) for n, s in series if date in s]
@@ -302,6 +349,11 @@ def main():
 
     new_dates = sorted(d for d in set().union(*[set(s) for _, s in ndx_ok])
                        if d > last["date"])
+
+    prov = provisional_date()
+    if prov and prov in new_dates:
+        new_dates.remove(prov)
+        report["notes"].append(f"{prov} 은(는) 미국 장중이라 아직 종가가 아니어서 받지 않았습니다(임시 시세 방지).")
 
     prev_close = float(last["ndx"])
     for d in new_dates:
@@ -369,6 +421,9 @@ def main():
     # FRED 는 미 동부 밤늦게 갱신돼 이른 실행에서는 하루 뒤처져 있다.
     # 그래서 다음 실행 때 최근 며칠치를 독립 소스와 다시 대조한다.
     # 규칙상 체결이 T+1 이므로, 이 재검증은 그 값으로 실제 매매하기 전에 끝난다.
+    healed = heal_recent(rows, ndx_ok)
+    if healed:
+        report["healed"] = healed
     recheck = []
     for r in rows[-6:]:
         for name, s in ndx_ok:
